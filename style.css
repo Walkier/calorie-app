@@ -205,6 +205,7 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; font-
 .empty { margin-top: 24px; text-align: center; color: var(--muted); }
 
 .footer { margin-top: 24px; text-align: center; }
+.version { margin-top: 8px; color: var(--muted); font-size: 0.8rem; }
 
 /* ----- Full-size photo ----- */
 

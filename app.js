@@ -1,8 +1,8 @@
 // Front end: one page, plain JavaScript, no build step.
-import * as store from './store.js';
-import * as photoStore from './photos.js';
-import { exportBackup, importBackup } from './backup.js';
-import { estimateCalories, modelLabel } from './gemini.js';
+import * as store from './store.js?v=10411b0';
+import * as photoStore from './photos.js?v=10411b0';
+import { exportBackup, importBackup } from './backup.js?v=10411b0';
+import { estimateCalories, modelLabel } from './gemini.js?v=10411b0';
 
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_SIDE = 1280; // px. Photos are shrunk before upload to keep it fast.
