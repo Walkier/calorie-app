@@ -72,11 +72,13 @@ button, textarea { font: inherit; color: inherit; }
 #go-today { margin-left: 10px; font-size: 0.9rem; }
 
 .target-info { max-width: 240px; margin: 6px auto 0; }
-.target-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.target-bar { position: relative; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .target-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+.target-mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); }
 .target-info p { margin-top: 2px; font-size: 0.85rem; }
+#target-left:empty { display: none; }
 .target-info.over .target-fill { background: var(--warn); }
-.target-info.over p { color: var(--warn); font-weight: 600; }
+.target-info.over #target-left { color: var(--warn); font-weight: 600; }
 #day-total { color: var(--text); font-weight: 600; }
 
 .nav-btn {
@@ -233,5 +235,7 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; font-
 #settings h2 { font-size: 1.15rem; }
 #settings h3 { margin: 8px 0 0; font-size: 1rem; }
 #settings label[for] { font-weight: 600; }
+.check { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-weight: 600; }
+.check input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
 .hint { color: var(--muted); font-size: 0.9rem; }
 .hint a { color: var(--accent); }

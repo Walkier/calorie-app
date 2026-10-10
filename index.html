@@ -18,8 +18,9 @@
       <h1 id="day-title">Today</h1>
       <p><span id="day-total">0</span><span id="day-target"></span> kcal <button type="button" id="go-today" class="link-btn" hidden>Back to today</button></p>
       <div id="target-info" class="target-info" hidden>
-        <div class="target-bar" aria-hidden="true"><div class="target-fill"></div></div>
+        <div class="target-bar" aria-hidden="true"><div class="target-fill"></div><div class="target-mark" hidden></div></div>
         <p id="target-left"></p>
+        <p id="carried-over" hidden></p>
       </div>
     </div>
     <button type="button" id="next-day" class="nav-btn" aria-label="Next day">›</button>
@@ -63,6 +64,13 @@
       <label for="target">Daily target (kcal)</label>
       <input id="target" type="number" inputmode="numeric" min="1" max="20000" step="1" placeholder="e.g. 2000">
       <p class="hint">Optional. Leave it empty for no target.</p>
+
+      <label class="check"><input id="carry-over" type="checkbox"> Carry over excess</label>
+      <p class="hint">
+        Going over the target lowers what to aim for on the next days, shown by a mark on the
+        bar, until it's made up. At most a quarter of the target comes off a day, and only the
+        last 7 days count.
+      </p>
 
       <h3>Backup</h3>
       <p class="hint">Meals and photos are saved only in this browser. Export a backup now and then, and import it to restore or move to another device.</p>

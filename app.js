@@ -7,6 +7,8 @@ import { estimateCalories, modelLabel } from './gemini.js';
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_SIDE = 1280; // px. Photos are shrunk before upload to keep it fast.
 const PHOTO_QUALITY = 0.85;
+const CARRY_DAYS = 7; // with carry-over on, going over the target more than a week ago no longer counts
+const CARRY_SHARE = 0.25; // and at most this share of the target is taken off any one day
 
 const $ = (selector) => document.querySelector(selector);
 const els = {
@@ -32,7 +34,10 @@ const els = {
   dayTarget: $('#day-target'),
   targetInfo: $('#target-info'),
   targetFill: $('#target-info .target-fill'),
+  targetMark: $('#target-info .target-mark'),
   targetLeft: $('#target-left'),
+  carriedOver: $('#carried-over'),
+  carryOver: $('#carry-over'),
   exportBtn: $('#export-btn'),
   importInput: $('#import-input'),
   settingsStatus: $('#settings-status'),
@@ -91,25 +96,54 @@ function showDay(key) {
   els.next.disabled = key >= todayKey();
   els.goToday.hidden = viewingToday;
   els.submit.textContent = viewingToday ? 'Estimate & add' : `Add to ${label}`;
-  const total = meals.reduce((sum, meal) => sum + meal.calories, 0);
+  const total = mealTotal(meals);
   els.total.textContent = total.toLocaleString();
-  showTarget(total);
+  showTarget(key, total);
   els.empty.hidden = meals.length > 0;
   const items = meals.map(mealElement);
   els.list.replaceChildren(...items);
   showThumbnails(meals, items);
 }
 
-// "1,250 / 2,000 kcal" with a progress bar and what's left, if a daily target is set.
-function showTarget(total) {
+function mealTotal(meals) {
+  return meals.reduce((sum, meal) => sum + meal.calories, 0);
+}
+
+// "1,250 / 2,000 kcal" with a progress bar and what's left, or how much over, if a daily target
+// is set. With carry-over on, the day may have a lower amount to aim for: a mark on the bar shows
+// it, what's left counts down to it, and a line under the bar says how much was carried over.
+// Between the mark and the target nothing is counted; "over" is only for going past the target.
+function showTarget(day, total) {
   const target = store.getTarget();
   els.dayTarget.textContent = target ? ` / ${target.toLocaleString()}` : '';
   els.targetInfo.hidden = !target;
   if (!target) return;
-  const left = target - total;
+  const carried = store.getCarryOver() ? carriedOver(day, target) : 0;
+  const aim = target - carried;
+  const left = aim - total;
+  const over = total - target;
   els.targetFill.style.width = `${Math.min(100, (total / target) * 100)}%`;
-  els.targetInfo.classList.toggle('over', left < 0);
-  els.targetLeft.textContent = left >= 0 ? `${left.toLocaleString()} left` : `${(-left).toLocaleString()} over`;
+  els.targetMark.hidden = !carried;
+  els.targetMark.style.left = `${(aim / target) * 100}%`;
+  els.targetInfo.classList.toggle('over', over > 0);
+  if (over > 0) els.targetLeft.textContent = `${over.toLocaleString()} over`;
+  else els.targetLeft.textContent = left >= 0 ? `${left.toLocaleString()} left` : '';
+  els.carriedOver.hidden = !carried;
+  els.carriedOver.textContent = `${carried.toLocaleString()} carried over, so aim for ${aim.toLocaleString()}`;
+}
+
+// How much to lower a day's target for going over it on the days before. What's owed rolls
+// forward: each day adds what was eaten over the full target, or pays off what was eaten under
+// it, and a day's target comes down by at most CARRY_SHARE of it, so a big day is made up over
+// several. Eating under the target never earns extra. Days with nothing logged are skipped,
+// since a day that wasn't logged isn't a day of eating nothing.
+function carriedOver(day, target) {
+  let owed = 0;
+  for (let i = CARRY_DAYS; i > 0; i--) {
+    const meals = store.getMeals(shiftDay(day, -i));
+    if (meals.length) owed = Math.max(0, owed + mealTotal(meals) - target);
+  }
+  return Math.min(owed, Math.round(target * CARRY_SHARE));
 }
 
 // Photos come from IndexedDB, which is asynchronous, so they're filled in after the list.
@@ -317,6 +351,7 @@ async function submitMeal() {
 function openSettings(message = '') {
   els.apiKey.value = store.getApiKey();
   els.target.value = store.getTarget() || '';
+  els.carryOver.checked = store.getCarryOver();
   setStatus(els.settingsStatus, message);
   els.settings.showModal();
 }
@@ -328,6 +363,7 @@ els.openSettings.addEventListener('click', () => openSettings());
 els.settingsForm.addEventListener('submit', () => {
   store.setApiKey(els.apiKey.value.trim());
   store.setTarget(els.target.value);
+  store.setCarryOver(els.carryOver.checked);
   showDay(currentDay);
 });
 
@@ -358,8 +394,11 @@ els.importInput.addEventListener('change', async () => {
   setStatus(els.settingsStatus, 'Importing…');
   try {
     const added = await importBackup(file);
-    // The backup may have set a target; show it so "Save & close" doesn't clear it.
-    if (!els.target.value) els.target.value = store.getTarget() || '';
+    // The backup may have set the target and carry-over; show them so "Save & close" keeps them.
+    if (!els.target.value && store.getTarget()) {
+      els.target.value = store.getTarget() || '';
+      els.carryOver.checked = store.getCarryOver();
+    }
     setStatus(els.settingsStatus, `Imported ${plural(added.meals, 'meal')}, ${plural(added.photos, 'photo')}.`);
   } catch (err) {
     setStatus(els.settingsStatus, err.message, true);

@@ -1,6 +1,6 @@
 // Backup files: everything except the API key, in one JSON file.
 //   { app: "calorie-tracker", version: 2, exportedAt,
-//     target (daily kcal, only if set),
+//     target (daily kcal, only if set), carryOver (true, only if on),
 //     days: { "YYYY-MM-DD": [meal, ...] },
 //     photos: [{ mealId, mime, data (base64) }] }
 // Version 1 files (meals only, no photos) still import.
@@ -23,6 +23,7 @@ export async function exportBackup() {
     version: VERSION,
     exportedAt: new Date().toISOString(),
     target: store.getTarget() || undefined, // left out of the file when there's no target
+    carryOver: store.getCarryOver() || undefined, // likewise when carry-over is off
     days,
   });
   let out = new Blob([header.slice(0, -1), ',"photos":[']);
@@ -46,7 +47,11 @@ export async function importBackup(file) {
   }
 
   const addedIds = store.mergeDays(data.days);
-  if (!store.getTarget()) store.setTarget(data.target); // keep this device's target if it has one
+  // The target and carry-over come from the backup only if this device has no target of its own.
+  if (data.target && !store.getTarget()) {
+    store.setTarget(data.target);
+    store.setCarryOver(data.carryOver === true);
+  }
 
   // Only restore photos of meals that were just added, so importing twice doesn't duplicate them.
   const wanted = (Array.isArray(data.photos) ? data.photos : []).filter(

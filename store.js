@@ -4,6 +4,7 @@
 //   calories:day:2026-10-08 -> [meal, meal, ...]
 //   calories:apiKey         -> the Gemini API key
 //   calories:target         -> daily calorie target (absent means no target)
+//   calories:carryOver      -> "1" when going over the target lowers the next days' targets
 //
 // A meal looks like:
 //   { id, day, createdAt, description, title, calories, items: [{ name, portion, calories }],
@@ -13,6 +14,7 @@
 const DAY_PREFIX = 'calories:day:';
 const API_KEY = 'calories:apiKey';
 const TARGET = 'calories:target';
+const CARRY_OVER = 'calories:carryOver';
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function readDay(day) {
@@ -75,6 +77,16 @@ export function setTarget(target) {
   target = Math.round(Number(target));
   if (target > 0) localStorage.setItem(TARGET, String(target));
   else localStorage.removeItem(TARGET);
+}
+
+/** Whether excess over the target is carried over to the next days. Off unless turned on. */
+export function getCarryOver() {
+  return localStorage.getItem(CARRY_OVER) === '1';
+}
+
+export function setCarryOver(on) {
+  if (on) localStorage.setItem(CARRY_OVER, '1');
+  else localStorage.removeItem(CARRY_OVER);
 }
 
 // ---------- Backup (used by backup.js) ----------
