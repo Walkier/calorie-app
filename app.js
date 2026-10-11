@@ -1,8 +1,8 @@
 // Front end: one page, plain JavaScript, no build step.
-import * as store from './store.js?v=10411b0';
-import * as photoStore from './photos.js?v=10411b0';
-import { exportBackup, importBackup } from './backup.js?v=10411b0';
-import { estimateCalories, modelLabel } from './gemini.js?v=10411b0';
+import * as store from './store.js?v=d7054d3';
+import * as photoStore from './photos.js?v=d7054d3';
+import { exportBackup, importBackup } from './backup.js?v=d7054d3';
+import { estimateCalories, modelLabel } from './gemini.js?v=d7054d3';
 
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_SIDE = 1280; // px. Photos are shrunk before upload to keep it fast.
@@ -36,7 +36,6 @@ const els = {
   targetFill: $('#target-info .target-fill'),
   targetMark: $('#target-info .target-mark'),
   targetLeft: $('#target-left'),
-  carriedOver: $('#carried-over'),
   carryOver: $('#carry-over'),
   exportBtn: $('#export-btn'),
   importInput: $('#import-input'),
@@ -111,8 +110,8 @@ function mealTotal(meals) {
 
 // "1,250 / 2,000 kcal" with a progress bar and what's left, or how much over, if a daily target
 // is set. With carry-over on, the day may have a lower amount to aim for: a mark on the bar shows
-// it, what's left counts down to it, and a line under the bar says how much was carried over.
-// Between the mark and the target nothing is counted; "over" is only for going past the target.
+// it, and what's left counts down to it. Between the mark and the target nothing is counted;
+// "over" is only for going past the target.
 function showTarget(day, total) {
   const target = store.getTarget();
   els.dayTarget.textContent = target ? ` / ${target.toLocaleString()}` : '';
@@ -128,8 +127,6 @@ function showTarget(day, total) {
   els.targetInfo.classList.toggle('over', over > 0);
   if (over > 0) els.targetLeft.textContent = `${over.toLocaleString()} over`;
   else els.targetLeft.textContent = left >= 0 ? `${left.toLocaleString()} left` : '';
-  els.carriedOver.hidden = !carried;
-  els.carriedOver.textContent = `${carried.toLocaleString()} carried over, so aim for ${aim.toLocaleString()}`;
 }
 
 // How much to lower a day's target for going over it on the days before. What's owed rolls

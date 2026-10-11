@@ -4,11 +4,13 @@
 
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-// Models to try, in order: the main model first, then the backup. Each model has its own
-// capacity and free-tier quota, so when one is overloaded or used up the other often works.
+// Models to try, in order: the main model first, then the backups. Each model has its own
+// capacity and free-tier quota, so when one is overloaded or used up another often works.
+// `tries` is how many times to try a model when it has temporary server errors.
 const MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', tries: 2 },
+  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', tries: 3 },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', tries: 4 },
 ];
 
 // "high" is Gemini's extended thinking level, used for every model.
@@ -16,8 +18,7 @@ const THINKING_LEVEL = 'high';
 const TIMEOUT_MS = 120_000; // per request; high thinking usually takes 10–40 s
 
 // Retries for temporary server errors, with exponential backoff: wait about 1 s, then 2 s,
-// then 4 s between tries of the same model. After the last try, move on to the backup model.
-const TRIES_PER_MODEL = 4;
+// then 4 s between tries of the same model. After a model's last try, move on to the next one.
 const BASE_DELAY_MS = 1000;
 const RETRY_STATUSES = new Set([500, 502, 503]);
 
@@ -61,7 +62,7 @@ export function modelLabel(id) {
 }
 
 /**
- * Gets an estimate, retrying and falling back to the backup model as needed.
+ * Gets an estimate, retrying and falling back to the backup models as needed.
  * onStatus(message) is called with progress updates while retrying, for showing to the user.
  *
  * @param {{ apiKey: string, text: string, images: { mime: string, base64: string }[], onStatus?: (message: string) => void }} meal
@@ -75,22 +76,23 @@ export async function estimateCalories({ apiKey, text, images, onStatus = () => 
     const previous = failures.at(-1);
     if (previous) onStatus(`${previous.model.label} ${previous.error.message}. Trying ${model.label}…`);
 
-    for (let attempt = 1; attempt <= TRIES_PER_MODEL; attempt++) {
+    for (let attempt = 1; attempt <= model.tries; attempt++) {
       try {
         return { ...(await callModel(apiKey, model.id, body)), model: model.id };
       } catch (error) {
         if (!(error instanceof Unavailable)) throw error; // e.g. a bad API key: retrying won't help
-        if (!error.retry || attempt === TRIES_PER_MODEL) {
+        if (!error.retry || attempt === model.tries) {
           failures.push({ model, error });
-          break; // on to the backup model
+          break; // on to the next model
         }
-        onStatus(`${model.label} ${error.message}. Retrying (try ${attempt + 1} of ${TRIES_PER_MODEL})…`);
+        onStatus(`${model.label} ${error.message}. Retrying (try ${attempt + 1} of ${model.tries})…`);
         await sleep(backoffDelay(attempt));
       }
     }
   }
 
-  const summary = failures.map((f) => `${f.model.label} ${f.error.message}`).join(', and ');
+  // "A failed, B failed, and C failed"
+  const summary = new Intl.ListFormat('en').format(failures.map((f) => `${f.model.label} ${f.error.message}`));
   const advice = failures.every((f) => f.error.rateLimit)
     ? 'The free tier allows a limited number of requests per day, so try again later.'
     : 'Try again in a few minutes.';
@@ -156,9 +158,9 @@ async function callModel(apiKey, modelId, body) {
       retry: true,
     });
   }
-  // Rate limit or used-up quota: the backup model has its own quota, so switch right away.
+  // Rate limit or used-up quota: each model has its own quota, so switch right away.
   if (res.status === 429) throw new Unavailable('hit its rate limit', { rateLimit: true });
-  // Model not found (e.g. retired by Google) or the server's own deadline passed: try the backup.
+  // Model not found (e.g. retired by Google) or the server's own deadline passed: try the next one.
   if (res.status === 404) throw new Unavailable('is not available (error 404)');
   if (res.status === 504) throw new Unavailable('took too long to respond (error 504)');
 
