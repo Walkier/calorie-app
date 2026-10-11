@@ -1,10 +1,12 @@
 // Meals and settings live in this browser's localStorage (photos are in IndexedDB, see
-// photos.js). Nothing is sent anywhere except the estimate request to Gemini.
+// photos.js). Nothing is sent anywhere except the requests to Gemini.
 // Each day is stored under its own key to keep reads small:
 //   calories:day:2026-10-08 -> [meal, meal, ...]
 //   calories:apiKey         -> the Gemini API key
 //   calories:target         -> daily calorie target (absent means no target)
 //   calories:carryOver      -> "1" when going over the target lowers the next days' targets
+//   calories:suggestion     -> { day, text }: the food ideas Gemini last suggested, and the day it
+//                              was asked (text is empty until it answers, or if it couldn't)
 //
 // A meal looks like:
 //   { id, day, createdAt, description, title, calories, items: [{ name, portion, calories }],
@@ -15,6 +17,7 @@ const DAY_PREFIX = 'calories:day:';
 const API_KEY = 'calories:apiKey';
 const TARGET = 'calories:target';
 const CARRY_OVER = 'calories:carryOver';
+const SUGGESTION = 'calories:suggestion';
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function readDay(day) {
@@ -87,6 +90,19 @@ export function getCarryOver() {
 export function setCarryOver(on) {
   if (on) localStorage.setItem(CARRY_OVER, '1');
   else localStorage.removeItem(CARRY_OVER);
+}
+
+/** The latest food ideas, as { day, text }, or null if none were asked for yet. */
+export function getSuggestion() {
+  try {
+    return JSON.parse(localStorage.getItem(SUGGESTION));
+  } catch {
+    return null;
+  }
+}
+
+export function setSuggestion(day, text) {
+  localStorage.setItem(SUGGESTION, JSON.stringify({ day, text }));
 }
 
 // ---------- Backup (used by backup.js) ----------

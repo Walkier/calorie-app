@@ -1,6 +1,9 @@
-// Calorie estimation via the Gemini API, called directly from the browser.
-// This is the only file that knows about the LLM provider. To switch providers,
-// rewrite estimateCalories() and keep the same input and return shape.
+// Calls to the Gemini API, made directly from the browser: calorie estimates and the daily food
+// ideas. This is the only file that knows about the LLM provider. To switch providers, rewrite
+// estimateCalories() and suggestFoods() and keep the same input and return shapes.
+// What Gemini is told, and the shape of its answers, are in the prompts/ folder.
+import * as estimatePrompt from './prompts/estimate.js?v=590868f';
+import * as suggestionPrompt from './prompts/suggestion.js?v=590868f';
 
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -22,39 +25,9 @@ const TIMEOUT_MS = 120_000; // per request; high thinking usually takes 10–40 
 const BASE_DELAY_MS = 1000;
 const RETRY_STATUSES = new Set([500, 502, 503]);
 
-const INSTRUCTIONS = `You are a nutrition expert estimating the calories in a meal someone ate.
-You will get a text description, one or more photos, or both.
-
-- Identify each food and drink, estimate its portion size, and estimate its calories.
-  In photos, use plates, utensils, hands and packaging to judge scale.
-- Prefer the text over the photo for things a photo can't show: quantities, how much was
-  actually eaten, ingredients, brands, cooking method.
-- If a nutrition label or a menu with calorie counts is visible or mentioned, use those numbers.
-- Include likely hidden calories such as cooking oil, butter, dressings and sauces.
-- Give one best estimate per item, never a range. total_calories must equal the sum of the items.
-- If there is no food or drink at all, return an empty items list, 0 calories, and say so in notes.`;
-
-const RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    title: { type: 'string', description: 'Short name for the meal, e.g. "Chicken burrito bowl"' },
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          portion: { type: 'string', description: 'Estimated amount, e.g. "1 cup" or "150 g"' },
-          calories: { type: 'integer' },
-        },
-        required: ['name', 'portion', 'calories'],
-      },
-    },
-    total_calories: { type: 'integer' },
-    notes: { type: 'string', description: 'One short sentence on the main assumptions' },
-  },
-  required: ['title', 'items', 'total_calories', 'notes'],
-};
+// Food ideas longer than this, in characters, both lines together, are rejected rather than shown.
+// The prompt asks for about 50 words, roughly 300 characters.
+const MAX_SUGGESTION_LENGTH = 400;
 
 /** Display name for a model id, e.g. for "Estimated by Gemini 3.8 Flash". */
 export function modelLabel(id) {
@@ -69,7 +42,51 @@ export function modelLabel(id) {
  * @returns {Promise<{ title: string, calories: number, items: { name: string, portion: string, calories: number }[], notes: string, model: string }>}
  */
 export async function estimateCalories({ apiKey, text, images, onStatus = () => {} }) {
-  const body = JSON.stringify(requestBody(text, images));
+  // Google recommends putting images before the text that refers to them.
+  const parts = images.map((img) => ({ inlineData: { mimeType: img.mime, data: img.base64 } }));
+  parts.push({ text: text ? `Meal description: ${text}` : 'Estimate the calories in the meal in the photo(s).' });
+  const body = requestBody(estimatePrompt, parts);
+  const { answer, model } = await ask(apiKey, body, 'an estimate', onStatus);
+  return { ...toEstimate(answer), model };
+}
+
+/**
+ * Food ideas based on the meals of the last few days. `days` are the days that have meals,
+ * oldest first, and `target` is the daily target (0 for none).
+ * `congratulation` is empty unless they're doing well. Neither part contains line breaks.
+ *
+ * @param {{ apiKey: string, target: number, days: { day: string, total: number, meals: object[] }[] }} log
+ * @returns {Promise<{ congratulation: string, ideas: string }>}
+ */
+export async function suggestFoods({ apiKey, target, days }) {
+  // Only what the ideas need: no ids, times, photos, estimate notes or settings other than the target.
+  const log = {
+    dailyTarget: target || undefined,
+    days: days.map(({ day, total, meals }) => ({
+      date: day,
+      totalCalories: total,
+      meals: meals.map((meal) => ({
+        description: meal.description || undefined, // empty when only photos were sent
+        title: meal.title,
+        calories: meal.calories,
+        foods: meal.items.map((item) => `${item.name} (${item.portion})`),
+      })),
+    })),
+  };
+  const body = requestBody(suggestionPrompt, [{ text: `Food log: ${JSON.stringify(log)}` }]);
+  const { answer } = await ask(apiKey, body, 'food ideas');
+  const line = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const congratulation = line(answer.congratulation);
+  const ideas = line(answer.ideas);
+  if (!ideas) throw new Error('Gemini returned no food ideas.');
+  if (congratulation.length + ideas.length > MAX_SUGGESTION_LENGTH) throw new Error("Gemini's food ideas were too long.");
+  return { congratulation, ideas };
+}
+
+// Sends a request, retrying and falling back to the backup models as needed. Returns the parsed
+// JSON answer and the id of the model that gave it. `what` names what was asked for, in the error
+// if every model fails: "Couldn't get an estimate: …".
+async function ask(apiKey, body, what, onStatus = () => {}) {
   const failures = []; // [{ model, error }] for the final message if every model fails
 
   for (const model of MODELS) {
@@ -78,7 +95,7 @@ export async function estimateCalories({ apiKey, text, images, onStatus = () => 
 
     for (let attempt = 1; attempt <= model.tries; attempt++) {
       try {
-        return { ...(await callModel(apiKey, model.id, body)), model: model.id };
+        return { answer: await callModel(apiKey, model.id, body), model: model.id };
       } catch (error) {
         if (!(error instanceof Unavailable)) throw error; // e.g. a bad API key: retrying won't help
         if (!error.retry || attempt === model.tries) {
@@ -96,7 +113,7 @@ export async function estimateCalories({ apiKey, text, images, onStatus = () => 
   const advice = failures.every((f) => f.error.rateLimit)
     ? 'The free tier allows a limited number of requests per day, so try again later.'
     : 'Try again in a few minutes.';
-  throw new Error(`Couldn't get an estimate: ${summary}. ${advice}`);
+  throw new Error(`Couldn't get ${what}: ${summary}. ${advice}`);
 }
 
 // Thrown when a model can't answer right now. The message completes "<model name> ...".
@@ -117,19 +134,17 @@ function backoffDelay(n) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function requestBody(text, images) {
-  // Google recommends putting images before the text that refers to them.
-  const parts = images.map((img) => ({ inlineData: { mimeType: img.mime, data: img.base64 } }));
-  parts.push({ text: text ? `Meal description: ${text}` : 'Estimate the calories in the meal in the photo(s).' });
-  return {
-    systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
+// `prompt` is one of the files in prompts/.
+function requestBody(prompt, parts) {
+  return JSON.stringify({
+    systemInstruction: { parts: [{ text: prompt.INSTRUCTIONS }] },
     contents: [{ role: 'user', parts }],
     generationConfig: {
       thinkingConfig: { thinkingLevel: THINKING_LEVEL },
       responseMimeType: 'application/json',
-      responseJsonSchema: RESPONSE_SCHEMA,
+      responseJsonSchema: prompt.SCHEMA,
     },
-  };
+  });
 }
 
 // One request to one model. Throws Unavailable for problems another try or model might fix,
@@ -170,10 +185,11 @@ async function callModel(apiKey, modelId, body) {
     throw new Error(`Gemini error ${res.status}: ${message}`);
   }
 
-  return parseEstimate(data);
+  return parseAnswer(data);
 }
 
-function parseEstimate(data) {
+// The JSON in a response, parsed.
+function parseAnswer(data) {
   const candidate = data.candidates?.[0];
   // Skip thought-summary parts; only the answer parts hold the JSON.
   const answer = (candidate?.content?.parts ?? [])
@@ -182,17 +198,19 @@ function parseEstimate(data) {
     .join('');
 
   if (!answer) {
-    const reason = data.promptFeedback?.blockReason ?? candidate?.finishReason ?? 'no answer';
-    throw new Error(`Gemini returned no estimate (${reason}).`);
+    const reason = data.promptFeedback?.blockReason ?? candidate?.finishReason ?? 'no reason given';
+    throw new Error(`Gemini returned no answer (${reason}).`);
   }
 
-  let parsed;
   try {
-    parsed = JSON.parse(answer.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    return JSON.parse(answer.replace(/^```(?:json)?\s*|\s*```$/g, ''));
   } catch {
     throw new Error('Gemini returned an answer that was not valid JSON. Try again.');
   }
+}
 
+// The estimate in Gemini's answer, checked and tidied.
+function toEstimate(parsed) {
   const items = (Array.isArray(parsed.items) ? parsed.items : []).map((it) => ({
     name: String(it.name ?? ''),
     portion: String(it.portion ?? ''),

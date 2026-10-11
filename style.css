@@ -115,6 +115,9 @@ textarea, input[type="password"], input[type="number"] {
   color: inherit;
 }
 textarea { resize: vertical; }
+/* While empty, the meal box grows to fit its hint (the daily food ideas), but stays at least
+   3 lines tall: 3 lines plus the padding and border. */
+#meal-text:placeholder-shown { field-sizing: content; min-height: calc(3lh + 22px); }
 textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .form-actions { display: flex; gap: 8px; }

@@ -4,8 +4,8 @@
 //     days: { "YYYY-MM-DD": [meal, ...] },
 //     photos: [{ mealId, mime, data (base64) }] }
 // Version 1 files (meals only, no photos) still import.
-import * as store from './store.js?v=d7054d3';
-import * as photos from './photos.js?v=d7054d3';
+import * as store from './store.js?v=590868f';
+import * as photos from './photos.js?v=590868f';
 
 const APP = 'calorie-tracker';
 const VERSION = 2;

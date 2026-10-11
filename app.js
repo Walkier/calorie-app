@@ -1,14 +1,15 @@
 // Front end: one page, plain JavaScript, no build step.
-import * as store from './store.js?v=d7054d3';
-import * as photoStore from './photos.js?v=d7054d3';
-import { exportBackup, importBackup } from './backup.js?v=d7054d3';
-import { estimateCalories, modelLabel } from './gemini.js?v=d7054d3';
+import * as store from './store.js?v=590868f';
+import * as photoStore from './photos.js?v=590868f';
+import { exportBackup, importBackup } from './backup.js?v=590868f';
+import { estimateCalories, suggestFoods, modelLabel } from './gemini.js?v=590868f';
 
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_SIDE = 1280; // px. Photos are shrunk before upload to keep it fast.
 const PHOTO_QUALITY = 0.85;
 const CARRY_DAYS = 7; // with carry-over on, going over the target more than a week ago no longer counts
 const CARRY_SHARE = 0.25; // and at most this share of the target is taken off any one day
+const SUGGESTION_DAYS = 7; // the daily food ideas are based on the meals of this many days before today
 
 const $ = (selector) => document.querySelector(selector);
 const els = {
@@ -71,6 +72,11 @@ function shiftDay(key, days) {
   const d = parseKey(key);
   d.setDate(d.getDate() + days);
   return dateKey(d);
+}
+
+/** The `count` days before `key`, oldest first. */
+function daysBefore(key, count) {
+  return Array.from({ length: count }, (_, i) => shiftDay(key, i - count));
 }
 
 function dayLabel(key) {
@@ -136,8 +142,8 @@ function showTarget(day, total) {
 // since a day that wasn't logged isn't a day of eating nothing.
 function carriedOver(day, target) {
   let owed = 0;
-  for (let i = CARRY_DAYS; i > 0; i--) {
-    const meals = store.getMeals(shiftDay(day, -i));
+  for (const before of daysBefore(day, CARRY_DAYS)) {
+    const meals = store.getMeals(before);
     if (meals.length) owed = Math.max(0, owed + mealTotal(meals) - target);
   }
   return Math.min(owed, Math.round(target * CARRY_SHARE));
@@ -343,6 +349,45 @@ async function submitMeal() {
   showDay(currentDay);
 }
 
+// ---------- Daily food ideas ----------
+
+// Once a day, the meals of the last SUGGESTION_DAYS days go to Gemini (today's don't, since the
+// day isn't over), and its answer becomes the hint in the empty meal box: a line congratulating
+// the user if they're doing well, then a line of food ideas. Nothing is asked if none of those
+// days has meals, or while offline. Once it asks, the day is done, whatever happens: if Gemini
+// fails, its answer is rejected, or the app is closed before it answers, there's no hint until
+// tomorrow. That way a problem can't use up the free-tier quota by asking again and again.
+
+const defaultHint = els.text.placeholder;
+
+/** Shows today's food ideas, first asking Gemini for them if that hasn't been done today. */
+async function updateSuggestion() {
+  showSuggestion();
+  const today = todayKey();
+  const apiKey = store.getApiKey();
+  if (!apiKey || !navigator.onLine || store.getSuggestion()?.day === today) return;
+  const days = [];
+  for (const day of daysBefore(today, SUGGESTION_DAYS)) {
+    const meals = store.getMeals(day).reverse(); // oldest first
+    if (meals.length) days.push({ day, total: mealTotal(meals), meals });
+  }
+  if (!days.length) return;
+
+  store.setSuggestion(today, ''); // today's turn, used up before asking
+  try {
+    const { congratulation, ideas } = await suggestFoods({ apiKey, target: store.getTarget(), days });
+    store.setSuggestion(today, congratulation ? `${congratulation}\n${ideas}` : ideas);
+    showSuggestion();
+  } catch {
+    // No hint today; the box keeps its usual one
+  }
+}
+
+function showSuggestion() {
+  const suggestion = store.getSuggestion();
+  els.text.placeholder = suggestion?.day === todayKey() && suggestion.text ? suggestion.text : defaultHint;
+}
+
 // ---------- Settings ----------
 
 function openSettings(message = '') {
@@ -362,6 +407,7 @@ els.settingsForm.addEventListener('submit', () => {
   store.setTarget(els.target.value);
   store.setCarryOver(els.carryOver.checked);
   showDay(currentDay);
+  updateSuggestion(); // e.g. the API key was just added, or a backup imported
 });
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -412,9 +458,11 @@ els.next.addEventListener('click', () => {
 els.goToday.addEventListener('click', () => showDay(todayKey()));
 
 // When the app comes back to the foreground (it may have been open overnight),
-// move on to the new day if we were showing "Today".
+// move on to the new day if we were showing "Today", and get the new day's food ideas.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') showDay(viewingToday ? todayKey() : currentDay);
+  if (document.visibilityState !== 'visible') return;
+  showDay(viewingToday ? todayKey() : currentDay);
+  updateSuggestion();
 });
 
 // ---------- Start ----------
@@ -423,4 +471,5 @@ document.addEventListener('visibilitychange', () => {
 navigator.storage?.persist?.().catch(() => {});
 
 showDay(currentDay);
+updateSuggestion();
 if (!store.getApiKey()) openSettings('Add your Gemini API key to get started.');
